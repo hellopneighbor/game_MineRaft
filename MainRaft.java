@@ -481,22 +481,61 @@ class Game2DPanel extends JPanel implements Runnable {
     }
 
     private int findSurfaceRow(int col) {
+        if (col < 0 || col >= COLS) return UP_LIMIT;
+
         for (int r = 0; r < ROWS; r++) {
-            if (map[r][col] != 0) {
+            // Деревья находятся над землей, поэтому они не должны
+            // считаться поверхностью для спавна.
+            if (map[r][col] == 1 || map[r][col] == 2 || map[r][col] == 4) {
                 return r;
             }
         }
         return UP_LIMIT;
     }
 
+    private boolean isPlayerPositionSafe(float px, float py) {
+        return !checkCollision(px, py);
+    }
+
+    private int findSafeSpawnColumn(Random rand) {
+        // Ищем колонку, где над поверхностью достаточно свободного места
+        // для игрока и следующая колонка тоже не закрывает спавн.
+        for (int attempt = 0; attempt < 200; attempt++) {
+            int col = rand.nextInt(COLS - 100) + 50;
+            int surfaceRow = findSurfaceRow(col);
+            if (surfaceRow <= 0) continue;
+
+            float spawnX = col * TILE_SIZE;
+            float spawnY = (surfaceRow - 1) * TILE_SIZE;
+            if (isPlayerPositionSafe(spawnX, spawnY)) {
+                return col;
+            }
+        }
+
+        // Надежный запасной вариант: ищем первую реально свободную колонку.
+        for (int col = 1; col < COLS - 1; col++) {
+            int surfaceRow = findSurfaceRow(col);
+            if (surfaceRow > 0 && isPlayerPositionSafe(col * TILE_SIZE, (surfaceRow - 1) * TILE_SIZE)) {
+                return col;
+            }
+        }
+        return COLS / 2;
+    }
+
+    private void placePlayerAtSafePosition(Random rand) {
+        int playerCol = findSafeSpawnColumn(rand);
+        int playerSurfaceRow = findSurfaceRow(playerCol);
+        playerX = playerCol * TILE_SIZE;
+        playerY = Math.max(0, (playerSurfaceRow - 1) * TILE_SIZE);
+        velocityY = 0;
+        isJumping = false;
+    }
+
     private void spawnEntitiesSafelyRandomly() {
         Random rand = new Random();
 
-        if (playerX == 0 && playerY == 0) {
-            int playerCol = rand.nextInt(COLS - 100) + 50;
-            int playerSurfaceRow = findSurfaceRow(playerCol);
-            playerX = playerCol * TILE_SIZE;
-            playerY = (playerSurfaceRow - 1) * TILE_SIZE;
+        if (playerX == 0 && playerY == 0 || !isPlayerPositionSafe(playerX, playerY)) {
+            placePlayerAtSafePosition(rand);
         }
 
         int playerCol = (int) (playerX / TILE_SIZE);
@@ -580,7 +619,7 @@ class Game2DPanel extends JPanel implements Runnable {
         for (int r = topRow; r <= bottomRow; r++) {
             for (int c = leftCol; c <= rightCol; c++) {
                 if (r >= 0 && r < ROWS && c >= 0 && c < COLS) {
-                    if (map[r][c] != 0 && map[r][c] != 3) return true;
+                    if (map[r][c] != 0) return true;
                 }
             }
         }
@@ -622,6 +661,19 @@ class Game2DPanel extends JPanel implements Runnable {
         }
     }
 
+    private void drawTexture(Graphics2D g2d, Image texture, int x, int y) {
+        if (texture == null) return;
+
+        int sourceWidth = texture.getWidth(null);
+        int sourceHeight = texture.getHeight(null);
+        if (sourceWidth <= 0 || sourceHeight <= 0) return;
+
+        // Всегда рисуем текстуру в квадрат TILE_SIZE × TILE_SIZE.
+        g2d.drawImage(texture,
+                x, y, x + TILE_SIZE, y + TILE_SIZE,
+                0, 0, sourceWidth, sourceHeight, null);
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
@@ -644,10 +696,10 @@ class Game2DPanel extends JPanel implements Runnable {
                 int x = c * TILE_SIZE - camX;
                 int y = r * TILE_SIZE - camY;
 
-                if (blockType == 1) g2d.drawImage(grassTexture, x, y, TILE_SIZE, TILE_SIZE, null);
-                else if (blockType == 2) g2d.drawImage(dirtTexture, x, y, TILE_SIZE, TILE_SIZE, null);
-                else if (blockType == 3) g2d.drawImage(woodTexture, x, y, TILE_SIZE, TILE_SIZE, null);
-                else if (blockType == 4) g2d.drawImage(oreTexture, x, y, TILE_SIZE, TILE_SIZE, null);
+                if (blockType == 1) drawTexture(g2d, grassTexture, x, y);
+                else if (blockType == 2) drawTexture(g2d, dirtTexture, x, y);
+                else if (blockType == 3) drawTexture(g2d, woodTexture, x, y);
+                else if (blockType == 4) drawTexture(g2d, oreTexture, x, y);
             }
         }
 
@@ -662,7 +714,7 @@ class Game2DPanel extends JPanel implements Runnable {
         int pDrawX = (int) playerX - camX;
         int pDrawY = (int) playerY - camY;
         if (playerSkin != null) {
-            g2d.drawImage(playerSkin, pDrawX, pDrawY, TILE_SIZE, TILE_SIZE, null);
+            drawTexture(g2d, playerSkin, pDrawX, pDrawY);
         }
 
         g2d.setColor(Color.WHITE);
